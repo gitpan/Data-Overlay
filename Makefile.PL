@@ -13,7 +13,7 @@ my %WriteMakefileArgs = (
   'AUTHOR' => 'Brad Bowman <cpan@bereft.net>',
   'BUILD_REQUIRES' => {
     'Test::Deep' => '0',
-    'Test::More' => '0'
+    'Test::More' => '0.87_01'
   },
   'CONFIGURE_REQUIRES' => {
     'ExtUtils::MakeMaker' => '6.31'
@@ -26,7 +26,7 @@ my %WriteMakefileArgs = (
     'List::MoreUtils' => '0',
     'Sub::Name' => '0'
   },
-  'VERSION' => '0.51',
+  'VERSION' => '0.53',
   'test' => {
     'TESTS' => 't/*.t'
   }

@@ -1,5 +1,6 @@
 package Data::Overlay;
 
+use 5.10.0; # for //
 use warnings;
 use strict;
 use Carp qw(cluck confess);
@@ -10,7 +11,7 @@ use Sub::Name qw(subname);
 use Exporter 'import';
 # Data::Dumper lazy loaded
 
-our $VERSION = '0.51';
+our $VERSION = '0.53';
 $VERSION = eval $VERSION; ## no critic
 
 our @EXPORT = qw(overlay);
@@ -72,7 +73,6 @@ __END__
 Once Data::Overlay is installed, you can run it with either:
 
     perl -x -MData::Overlay `pmpath Data::Overlay`
-    perl -x -MData::Overlay `pmpath Data::Overlay` -m # Peek result
 
     perl -x -MData::Overlay \
         `perl -MData::Overlay -le 'print $INC{"Data/Overlay.pm"}'`
@@ -306,13 +306,13 @@ $action_map{config} = sub {
 
     #my $new_conf = overlay($old_conf, $overlay->{conf}, $old_conf);
     # do we really want a config here XXX?
-    my $new_conf = overlay($old_conf, $overlay->{conf});
+    my $new_conf = overlay($old_conf, $overlay->{conf}); # eat dogfood #1
 
     # wrap all actions with debug if needed
     if (!defined $old_conf->{debug}
             && $new_conf->{debug} ) {
 
-        # XXX overlay action_map
+        # XXX overlay action_map, eat dogfood #2
         my $old_action_map = $new_conf->{action_map};
         my $new_action_map;
 
@@ -699,7 +699,11 @@ There is no protection against reference cycles in overlays.
 
 =head2 Unsharing Data with Clone
 
-Storable, etc
+If you don't want any sharing of data between the result and
+source or overlay, then use a clone.
+Either L<Storable>'s dclone or L<Clone>
+
+    $new_clone = dclone(overlay($old, $overlay));
 
 =head2 Escaping "=" Keys
 
@@ -745,33 +749,69 @@ L<http://rt.cpan.org>.
 
 Merging of nested data structures:
 
- * L<Hash::Merge> merge with global options
- * L<Data::Utilities> (L<Data::Merger>) merge with call-time options
- * L<Data::Nested> merging (per application options), paths and schemas
- * L<Data::ModeMerge> mode (overwrite/add/default) is in the data merged,
-   like Data::Overlay.
+=over
+
+=item * L<Hash::Merge> merge with global options
+
+=item * L<Data::Utilities> (L<Data::Merger>) merge with call-time options
+
+=item * L<Data::Nested> merging (per application options), paths and schemas
+
+=item * L<Data::ModeMerge>
+
+"Mode" (overwrite/add/default) is in the data merged, like Data::Overlay.
+Uses special characters to indicate the action performed.  Also permits
+local config overrides and extensions.
+
+=back
 
 "Path" based access to nested data structures:
 
- * L<Data::Path>
- * L<Data::DPath>
- * L<Data::SPath>
- * L<Data::FetchPath> eval-able paths
- * L<Class::XPath>
- * L<CGI::Expand>
- * L<Data::Hive> paths, accessors and better HoH
- * L<List::Util> C<<reduce { eval { $a->$b } } $object, split(/\./, $_)>>
+=over
+
+=item * L<Data::Path>
+
+OO XPath-like access to complex data structures
+
+=item * L<Data::DPath>
+
+=item * L<Data::SPath>
+
+=item * L<Data::FetchPath> eval-able paths
+
+=item * L<Class::XPath>
+
+=item * L<CGI::Expand>
+
+=item * L<Data::Hive> paths, accessors and better HoH
+
+=item * L<List::Util>
+
+    reduce { eval { $a->$b } } $object, split(/\./, $_)
+
+=back
 
 Lazy deep copying nested data:
 
- * L<Data::COW> - Copy on write
+=over
+
+=item * L<Data::COW> - Copy on write
+
+=back
 
 Data structure differences:
 
- * L<Data::Diff>
- * L<Data::Utilities> (L<Data::Comparator>)
- * L<Data::Rx> schema checking
- * L<Test::Deep>
+=over
+
+=item * L<Data::Diff>
+
+=item * L<Data::Utilities> (L<Data::Comparator>)
+
+=item * L<Data::Rx> schema checking
+
+=item * L<Test::Deep>
+
+=back
 
 L<autovivification> can avoid nested accesses creating intermediate keys.
 

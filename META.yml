@@ -4,7 +4,7 @@ author:
   - 'Brad Bowman <cpan@bereft.net>'
 build_requires:
   Test::Deep: 0
-  Test::More: 0
+  Test::More: 0.87_01
 configure_requires:
   ExtUtils::MakeMaker: 6.31
 dynamic_config: 0
@@ -14,9 +14,13 @@ meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
   version: 1.4
 name: Data-Overlay
+no_index:
+  package:
+    - Data::Overlay::Test
 requires:
   List::MoreUtils: 0
   Sub::Name: 0
 resources:
   bugtracker: http://rt.cpan.org/NoAuth/Bugs.html?Dist=Data-Overlay
-version: 0.51
+  repository: git://github.com/bowman/Data-Overlay.git
+version: 0.53
