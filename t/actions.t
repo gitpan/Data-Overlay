@@ -13,15 +13,15 @@ use Data::Overlay::Test qw(olok dt);
 
 =for debugging
 perl -Ilib -MYAML::XS -MData::Overlay -le 'print "TOP ", Dump ' -e \
-    'overlay({a=>2},{a=>{"=default"=>1}})'
+    'overlay({a=>2},{a=>{"=defor"=>1}})'
 =cut
 
-# =default
-olok({a=>2},{a=>{'=default'=>1}} => {a=>2});
-olok({a=>0},{a=>{'=default'=>1}} => {a=>0});
+# =defor
+olok({a=>2},{a=>{'=defor'=>1}} => {a=>2});
+olok({a=>0},{a=>{'=defor'=>1}} => {a=>0});
 olok({a=>''},{a=>{'=or'=>1}} => {a=>1});
-olok({a=>undef},{a=>{'=default'=>1}} => {a=>1});
-olok({a=>{b=>2}},{a=>{'=default'=>1}} => {a=>{b=>2}});
+olok({a=>undef},{a=>{'=defor'=>1}} => {a=>1});
+olok({a=>{b=>2}},{a=>{'=defor'=>1}} => {a=>{b=>2}});
 
 # =or
 olok({a=>2},{a=>{'=or'=>1}} => {a=>2});
@@ -56,11 +56,11 @@ olok({a=>[1]},{a=>{'=push'=>[2,3]}} => {a=>[1,2,3]});
 olok({a=>[1]},{a=>{'=push'=>[[2,3]]}} => {a=>[1,[2,3]]});
 olok({a=>[1]},{a=>{'=push'=>[[2],[3]]}} => {a=>[1,[2],[3]]});
 
-# =push + =default & =or
+# =push + =defor & =or
 olok({a=>[]},{a=>{'=or'=>[],'=push'=>1}} => {a=>[1]});
 olok({a=>0},{a=>{'=or'=>[],'=push'=>1}} => {a=>[1]});
 olok({a=>''},{a=>{'=or'=>[],'=push'=>1}} => {a=>[1]});
-olok({a=>undef},{a=>{'=default'=>[],'=push'=>1}} => {a=>[1]});
+olok({a=>undef},{a=>{'=defor'=>[],'=push'=>1}} => {a=>[1]});
 
 # =pop (value doesn't matter)
 olok({a=>[1,2]},{a=>{'=pop'=>''}} => {a=>[1]});
@@ -96,11 +96,11 @@ olok({a=>[1]},{a=>{'=unshift'=>[2,3]}} => {a=>[2,3,1]});
 olok({a=>[1]},{a=>{'=unshift'=>[[2,3]]}} => {a=>[[2,3],1]});
 olok({a=>[1]},{a=>{'=unshift'=>[[2],[3]]}} => {a=>[[2],[3],1]});
 
-# =unshift + =default & =or
+# =unshift + =defor & =or
 olok({a=>[]},{a=>{'=or'=>[],'=unshift'=>1}} => {a=>[1]});
 olok({a=>0},{a=>{'=or'=>[],'=unshift'=>1}} => {a=>[1]});
 olok({a=>''},{a=>{'=or'=>[],'=unshift'=>1}} => {a=>[1]});
-olok({a=>undef},{a=>{'=default'=>[],'=unshift'=>1}} => {a=>[1]});
+olok({a=>undef},{a=>{'=defor'=>[],'=unshift'=>1}} => {a=>[1]});
 
 # =shift (value doesn't matter)
 olok({a=>[1,2]},{a=>{'=shift'=>''}} => {a=>[2]});
@@ -129,6 +129,7 @@ olok({a=>[1]},{a=>{'=push'=>['push'], '=unshift'=>['unshift'],
                    '=pop'=>['pop'],   '=shift'=>['shift']}
                 } => {a=>[1]});
 
+# =config
 # try config (mainly for debugging other tests, like the next)
 olok(undef,{'=config' =>
                 {
@@ -147,7 +148,7 @@ olok(undef,{'=config' =>
                     conf => { debug => 0 },
                     data => {
                         '=defaults' => { a => undef },
-                        a =>{'=default'=>0, '=or'=>'or',
+                        a =>{'=defor'=>0, '=or'=>'or',
                             '=push'=>['pu','sh'], '=unshift'=>['unsh','ift'],
                             '=pop'=>['pop'],      '=shift'=>['shift']}
                     }
@@ -166,8 +167,38 @@ olok({a=>1},{a=>{'=run'=>{code=>sub{qw(a b c)}}}} => {a=>'c'});
 olok(undef,{'=run'=>{code=>sub{wantarray}}} => '');
 olok({a=>1},{a=>{'=run'=>{code=>sub{wantarray}}}} => {a=>''});
 
-# =foreach
+# =foreach hash
+olok({a=>1},{'=foreach'=>2} => {a=>2});
+olok({a=>1},{'=foreach'=>undef} => {a=>undef});
+olok({a=>1},{'=foreach'=>0} => {a=>0});
+olok({a=>1},{'=foreach'=>{}} => {a=>1});
+olok({a=>1,b=>0},{'=foreach'=>2} => {a=>2,b=>2});
+olok({a=>1,b=>0},{'=foreach'=>{'=or'=>2}} => {a=>1,b=>2});
+# =foreach array
+olok([1],{'=foreach'=>2} => [2]);
+olok([1],{'=foreach'=>undef} => [undef]);
+olok([1],{'=foreach'=>0} => [0]);
+olok([1],{'=foreach'=>{}} => [1]);
+olok([0,1],{'=foreach'=>2} => [2,2]);
+olok([0,1],{'=foreach'=>{'=or'=>2}} => [2,1]);
+
+# =foreach lower level
+olok({a=>{c=>[123]}},{a=>{'=foreach'=>{b=>2}}} => {a=>{c=>{b=>2}}});
+olok({a=>{c=>{b=>1}}},{a=>{'=foreach'=>{b=>2}}} => {a=>{c=>{b=>2}}});
+olok({a=>{c=>{d=>1}}},{a=>{'=foreach'=>{b=>2}}} => {a=>{c=>{b=>2,d=>1}}});
+
 # =seq / all
-# =config
+olok({a=>1},{'=seq'=>[]} => {a=>1});
+olok({a=>1},{'=seq'=>[{}]} => {a=>1});
+olok({a=>1},{'=seq'=>[{a=>2}]} => {a=>2});
+olok({a=>1},{'=seq'=>[{b=>2}]} => {a=>1,b=>2});
+olok({a=>1},{'=seq'=>[{a=>2},{a=>3}]} => {a=>3});
+olok({a=>undef},{'=seq'=>[{a=>{'=defor'=>0}},{a=>3}]} => {a=>3});
+olok({a=>3},{'=seq'=>[{a=>{'=defor'=>0}},{a=>undef}]} => {a=>undef});
+olok({a=>undef},{'=seq'=>[{a=>undef},{a=>{'=defor'=>0}}]} => {a=>0});
+olok({a=>undef},{'=seq'=>[{a=>3},{a=>{'=defor'=>0}}]} => {a=>3});
+olok({a=>undef},{'=seq'=>[{a=>{'=defor'=>0}},{a=>{'=push'=>1}}]} => {a=>[0,1]});
+olok({a=>[1]},{'=seq'=>[{a=>{'=pop'=>9}},{a=>{'=push'=>2}}]} => {a=>[2]});
+olok({a=>[1]},{'=seq'=>[{a=>{'=push'=>2}},{a=>{'=pop'=>9}}]} => {a=>[1]});
 
 done_testing();

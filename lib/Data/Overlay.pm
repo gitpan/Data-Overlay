@@ -4,18 +4,18 @@ use 5.10.0; # for //
 use warnings;
 use strict;
 use Carp qw(cluck confess);
-use Scalar::Util qw(reftype refaddr);
+use Scalar::Util qw(reftype refaddr blessed);
 use List::Util qw(reduce max);
 use List::MoreUtils qw(part);
 use Sub::Name qw(subname);
 use Exporter 'import';
-# Data::Dumper lazy loaded
+# Data::Dumper lazy loaded when debugging
 
-our $VERSION = '0.53';
+our $VERSION = '0.54';
 $VERSION = eval $VERSION; ## no critic
 
 our @EXPORT = qw(overlay);
-our @EXPORT_OK = qw(overlay overlay_all compose);
+our @EXPORT_OK = qw(overlay overlay_all compose combine_with);
 
 =head1 NAME
 
@@ -23,7 +23,7 @@ Data::Overlay - merge/overlay data with composable changes
 
 =head1 VERSION
 
-Data::Overlay version 0.51 - ALPHA, no compatibility promises, seriously
+Data::Overlay version 0.54 - ALPHA, no compatibility promises, seriously
 
 =head1 SYNOPSIS
 
@@ -54,7 +54,7 @@ Data::Overlay version 0.51 - ALPHA, no compatibility promises, seriously
         c  => { '=push' => 7 },     # append array
         d  => { da => [ "DA" ],     # replace w/ differing type
                 db => {
-                    '=default' => 123,  # only update if undef
+                    '=defor' => 123,  # only update if undef
                 },
               },
     );
@@ -113,27 +113,22 @@ but they combine the original and overlay in various ways,
 pushing/unshifting arrays, only overwriting false or undefined,
 up to providing ability to write your own combining callback.
 
-=head2 Memory Sharing
+=head2 Reference Sharing
 
-Cloning
-
+Data::Overlay tries to minimize copying and so will try
+to share references between the new structure and the old structure
+and overlay.  This means that changing any of these is likely
+to produce unintended consequences.  This sharing is only
+practical when the data structures are either read-only or
+cloned immediately after overlaying (Cloner not included).
 
 =head1 GLOSSARY
 
-overlay - (verb)
-        - (noun)
+  overlay
+       v : put something on top of something else
+       n : layer put on top of something else
 
-$ds, $old_ds, $new_ds - arbitrary Perl data-structure
-
-
-
-=head1 TODO
-
-I'm not sure about the overlay pile, maybe should just be one
-overlay at a time to make the client use compose or write
-a single one.  That seems a bit mean though.
-
-Self-referential ds & overlays.
+  $ds, $old_ds, $new_ds - arbitrary, nested Perl data-structures
 
 =cut
 
@@ -148,9 +143,8 @@ my $default_conf = {
         #state      => {},
         #protocol   => {},
     };
-# weaken( $default_conf->{action_map} ); XXX
 
-@action_order = qw(config delete default or defaults
+@action_order = qw(config overwrite delete defor or defaults
                    unshift push
                    shift   pop
                    foreach seq run);
@@ -176,6 +170,7 @@ sub _sort_actions {
 
 sub _isreftype {
     my ($type, $maybe_ref) = @_;
+    return 0 if blessed($maybe_ref);
     return reftype($maybe_ref) && reftype($maybe_ref) eq $type;
 }
 
@@ -187,8 +182,8 @@ sub _isreftype {
 
 Apply an overlay to $old_ds, returning $new_ds as the result.
 
-$old_ds is unchanged.  $new_ds may share references to part
-of $old_ds (see L<Memory Sharing>).  If this isn't desired
+$old_ds is unchanged.  $new_ds may share references to parts
+of $old_ds and $overlay (see L<Reference Sharing>).  If this isn't desired
 then clone $new_ds.
 
 =cut
@@ -211,32 +206,31 @@ sub overlay {
         # part might leave undefs
         $_ ||= [] for ($overlay_keys, $actions, $escaped_keys);
 
-        # 0-level copy so that actions operate on $ds in whatever form
-        my $new_ds = $ds;
+        # 0-level $ds copy for actions that operate on $new_ds as a whole
+        # ($new_ds need not be a HASH here)
+        my $new_ds = $ds; # don't use $ds anymore, $new_ds instead
 
         # apply each action in order to $new_ds, sequentially
         # (note that some items really need to nest inner overlays
-        #  to be useful, eg. config applies only to children under "data",
-        #  not to peers)
+        #  to be useful, eg. config applies only in a dynamic scope
+        #  to children under "data", not to peers)
         for my $action_key (_sort_actions($actions, $conf)) {
             my ($action) = ($action_key =~ /^=(.*)/);
             my $callback = $conf->{action_map}{$action};
-            die "No action ($action) in action_map" unless $callback;
+            die "No action '$action' in action_map" unless $callback;
             $new_ds = $callback->($new_ds, $overlay->{$action_key}, $conf);
         }
 
         # return if there are only actions, no plain keys
-        # ( important for overlaying scalars, eg. a: 1 +++ a: =default: 1 )
+        # ( important for overlaying scalars, eg. a: 1 +++ a: =defor 1 )
         return $new_ds unless @$overlay_keys || @$escaped_keys;
 
-        $ds = undef; # don't use $ds anymore, $new_ds instead
-
-        # There are keys in overlay, so insist on a $new_ds hash
+        # There are non-action keys in overlay, so insist on a $new_ds hash
         # (Shallow copy $new_ds in case it is a reference to $ds)
         if (_isreftype(HASH => $new_ds)) {
             $new_ds = { %$new_ds }; # shallow copy
         } else {
-            $new_ds = {}; # $new_ds is not a HASH ($ds wasn't), must one
+            $new_ds = {}; # $new_ds is not a HASH ($ds wasn't), must become one
         }
 
         # apply overlay_keys to $new_ds
@@ -255,9 +249,13 @@ sub overlay {
 
         return $new_ds;
     } else {
-        # all scalars and non-HASH overlay elements are overrides
-        return $overlay;
+        # all scalars, blessed and non-HASH overlay elements are 'overwrite'
+        # (by default, you could intercept all and do other things...)
+        my $callback = $conf->{action_map}{overwrite};
+        die "No action 'overwrite' in action_map" unless $callback;
+        return $callback->($ds, $overlay, $conf);
     }
+
     confess "A return is missing somewhere";
 }
 
@@ -293,9 +291,39 @@ sub compose {
     return { '=seq' => \@overlays };
 }
 
+=head2 combine_with
+
+    $combiner_sub = combine_with { $a && $b };
+    my $conf = { action_map => {
+                    and => $combiner_sub
+                 } };
+    my $new = overlay($this, $that, $conf);
+
+Utility to build simple overlay actions.  For example, the included
+"or" is just:
+
+    combine_with { $a || $b};
+
+$a is the old_ds parameter, $b is the overlay parameter.
+@_ contains the rest of the arguments.
+
+=cut
+#$action_map{defor} = combine_with { $a // $b};
+sub combine_with (&@) { ## no critic
+    my ($code) = shift;
+
+    return sub {
+        local ($a) = shift; # $old_ds
+        local ($b) = shift; # $overlay
+        return $code->(@_); # $conf (remainder of args in @_)
+    };
+}
+
 =head2 Actions
 
 =over 4
+
+=cut
 
 =item config
 
@@ -329,6 +357,27 @@ $action_map{config} = sub {
     }
 
     return overlay($old_ds, $overlay->{data}, $new_conf);
+};
+
+=item overwrite
+
+"Overwrite" the old location with the value of the overwrite key.
+This is the default action for non-HASH overlay elements.
+(The actual action used in this implicit case and also
+the explicit case is $conf->{action_map}{overwrite},
+so it can be overriden).
+
+You can also use C<overwrite> explicitly, to overlay an empty
+hash (which would otherwise be treated as a keyless, no-op overlay):
+
+  overlay(undef, {});                   # -> undef
+  overlay(undef, {'=overwrite'=>{}});   # -> {}
+
+=cut
+
+$action_map{overwrite} = sub {
+    my ($old_ds, $overlay, $conf) = @_;
+    return $overlay;
 };
 
 =item defaults
@@ -375,23 +424,19 @@ $action_map{delete} = sub {
     }
 };
 
-=item default
+=item defor
+
+Defined or (//) is used to combine the original and overlay
 
 =cut
 
-$action_map{default} = sub {
-    my ($old_ds, $overlay) = @_;
-    return $old_ds // $overlay;
-};
+$action_map{defor} = combine_with { $a // $b};
 
 =item or
 
 =cut
 
-$action_map{or} = sub {
-    my ($old_ds, $overlay) = @_;
-    return $old_ds || $overlay;
-};
+$action_map{or} = combine_with { $a || $b};
 
 =item push
 
@@ -491,6 +536,10 @@ $action_map{run} = sub {
 
 =item foreach
 
+Apply one overlay to all elements of an array or values of a hash
+(or just a scalar).  Often useful with =run if the overlay is
+a function of the original value.
+
 =cut
 
 # XXX each with (k,v) or [i,...]
@@ -504,7 +553,7 @@ $action_map{foreach} = sub {
         return {
             map {
                 $_ => overlay($old_ds->{$_}, $overlay, $conf)
-            } values %$old_ds
+            } keys %$old_ds
         };
     } else {
         return overlay($old_ds, $overlay, $conf);
@@ -512,6 +561,8 @@ $action_map{foreach} = sub {
 };
 
 =item seq
+
+Apply in sequence an array of overlays.
 
 =cut
 
@@ -575,34 +626,15 @@ sub _dt {
 }
 
 
-sub _combine (&) { ## no critic
-    my $code = @_;
-    return sub {
-        my ($old_ds, $overlay, $conf) = @_;
-        # $a = old, $b = new for _combine { $a && $b }
-        $a = $old_ds; $b = $overlay;
-        return $code->(@_);
-    }
-}
-
 __PACKAGE__; # true return
 __END__
 
-default // dor def_or
-or ||
-push pop shift unshift
-run code
-foreach
-seq
-
-defaults {}
-
-config - set local config (override action map / inverse)
 exists
 delete
 
 and/if/ifthen replace if $ds is true
 sprintf prepend_str append_str interpolate $_
+splice grep map sort
 +/-/*/++/--/x/%/**/./<</>>
 | & ^ ~ masks boolean logic
 conditionals? comparison?
@@ -622,39 +654,6 @@ grep
            "chomp", "chop", "chr", "crypt", "hex", "index", "lc", "lcfirst",
            "length", "oct", "ord", "pack", "q//", "qq//", "reverse", "rindex",
            "sprintf", "substr", "tr///", "uc", "ucfirst", "y///"
-
-       Regular expressions and pattern matching
-           "m//", "pos", "quotemeta", "s///", "split", "study", "qr//"
-
-       Functions for real @ARRAYs
-           "pop", "push", "shift", "splice", "unshift"
-
-       Functions for list data
-           "grep", "join", "map", "qw//", "reverse", "sort", "unpack"
-
-       Functions for real %HASHes
-           "delete", "each", "exists", "keys", "values"
-
-       Functions for fixed length data or records
-           "pack", "read", "syscall", "sysread", "syswrite", "unpack", "vec"
-
-
-       Keywords related to the control flow of your Perl program
-           "caller", "continue", "die", "do", "dump", "eval", "exit", "goto",
-           "last", "next", "redo", "return", "sub", "wantarray"
-
-       Miscellaneous functions
-           "defined", "dump", "eval", "formline", "local", "my", "our",
-           "reset", "scalar", "state", "undef", "wantarray"
-
-       Functions new in perl5
-           "abs", "bless", "break", "chomp", "chr", "continue", "default",
-           "exists", "formline", "given", "glob", "import", "lc", "lcfirst",
-           "lock", "map", "my", "no", "our", "prototype", "qr//", "qw//",
-           "qx//", "readline", "readpipe", "ref", "sub"*, "sysopen", "tie",
-           "tied", "uc", "ucfirst", "untie", "use", "when"
-
-
 
 =head1 DIAGNOSTICS
 
@@ -697,6 +696,8 @@ access (read-only) old and new versions.
 
 There is no protection against reference cycles in overlays.
 
+L<Devel::Cycle> or L<Data::Structure::Util> may help.
+
 =head2 Unsharing Data with Clone
 
 If you don't want any sharing of data between the result and
@@ -724,15 +725,19 @@ changing data that is supposed to be Readonly.
 
 Shared lexical variables.
 
+=head2 Where Are The Objects?
+
+This is a bit of an experiment in using data immutability, persistence
+and sharing instead of using OO conventions to manage changing state.
+(This approach doesn't hit all of the OO targets, but Data::Overlay's
+subset may be useful).
+
+Blessed references are treated as opaque object by default (not overlaid).
+(Encapsulation was ignored in developer release 0.53 and earlier).
+
 =head1 DEPENDENCIES
 
-=for author to fill in:
-    A list of all the other modules that this module relies upon,
-    including any restrictions on versions, and an indication whether
-    the module is part of the standard Perl distribution, part of the
-    module's distribution, or must be installed separately. ]
-
-None.
+L<List::MoreUtils>, L<Sub::Name>
 
 =head1 BUGS AND LIMITATIONS
 
@@ -765,29 +770,21 @@ local config overrides and extensions.
 
 =back
 
-"Path" based access to nested data structures:
+Potential overlay builders, modules that could be used to build
+overlays for data:
 
 =over
 
-=item * L<Data::Path>
-
-OO XPath-like access to complex data structures
-
-=item * L<Data::DPath>
-
-=item * L<Data::SPath>
-
-=item * L<Data::FetchPath> eval-able paths
-
-=item * L<Class::XPath>
-
 =item * L<CGI::Expand>
 
-=item * L<Data::Hive> paths, accessors and better HoH
+Build nested hashes from a flat path hash:
 
-=item * L<List::Util>
+    use CGI::Expand qw(expand_hash);
 
-    reduce { eval { $a->$b } } $object, split(/\./, $_)
+    my $overlay = expand_hash({"a.b.c"=>1,"a.b.d"=>[2,3]})
+    # = {'a' => {'b' => {'c' => 1,'d' => [1,2,3]}}};
+
+L<Hash::Flatten> also has an unflatten function.
 
 =back
 
